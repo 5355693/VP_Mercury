@@ -1,0 +1,221 @@
+---
+title: "Vernal pool mercury analysis"
+author: "John D Lloyd"
+date: "May 1, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+This document details a preliminary analysis of data collected on methylmercury levels in vernal pools in the Upper Valley. 
+
+## Data file summary
+```{r}
+data.df <- read.csv(url("https://raw.githubusercontent.com/5355693/VP_Mercury/master/hg_data.csv"))
+summary(data.df)
+```
+
+There are 6 pools, 3 of which are surrounded by deciduous forest (Downer, Mauran, and Podunk Decid) and 3 of which are surrounded by coniferous forest (Podunk Conif, Pomfret, and Shen). The number of samples differs by date and by pool because sample number is determined by the number of amphibians collected. 
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, error = FALSE}
+library(plyr)
+library(lubridate)
+attach(data.df)
+mytable <- table(Pool, Habitat)
+data.df$Sample_Date2 <- as.POSIXct(data.df$Sample_Date, format = "%m/%d/%y")
+data.df$Year <- year(data.df$Sample_Date2)
+data.df$individual <- seq(from = 1,to = nrow(data.df), by = 1)
+data.df<- data.df[order(data.df$Sample_Date2),]
+mytable <- table(Pool, Sample_Date)
+mytable
+```
+
+
+## Exploratory analysis
+### Mercury levels in water by pool, over time
+Levels of methylmercury in water differ among pools and habitats and by time of sample. In general, coniferous pools have higher levels of methylmercury, but variation among pools is substantial. In addition, a seasonal trend is evident in pools surrounded by deciduous forest, but not among pools surrounded by coniferous forest.
+
+```{r, echo=FALSE}
+library(ggplot2)
+p1<-ggplot(data = subset(data.df, Year == 2015))
+p1 + geom_smooth(aes(x = Sample_Date2, y = Water_MeHg), method = "lm") + 
+  geom_point(aes(x = Sample_Date2, y = Water_MeHg, color = Pool)) + 
+  geom_line(aes (x = Sample_Date2, y = Water_MeHg, color = Pool)) + facet_wrap(~Habitat) + 
+  xlab("Sample Date") + ylab("Water methlymercury") + 
+  theme(axis.text.x = element_text(angle = 340, vjust = 0.5))
+```
+
+Performing a t-test assuming unequal variances, we find that the 95% credible interval for the difference in methylmercury (the parameter named "delta") between the two habitats includes zero (-0.00013, 0.00131).
+```{r, echo = FALSE}
+library(R2jags)
+library(mcmcplots)
+#Subset the data to create a datafile with only one line of data per sample period, because only one water sample #is taken per visit.
+data_subset <- subset(data.df, !duplicated(Water_MeHg))
+data_subset <- subset(data_subset, (!is.na(data_subset$Water_MeHg)))
+x1 <- data_subset$Habitat[data_subset$Habitat == "Deciduous"]
+x2 <- data_subset$Habitat[data_subset$Habitat == "Coniferous"]
+y1 <- data_subset$Water_MeHg[data_subset$Habitat == "Deciduous"]
+y2 <- data_subset$Water_MeHg[data_subset$Habitat == "Coniferous"]
+n1 <- length(data_subset$Habitat[data_subset$Habitat == "Deciduous"])
+n2 <- length(data_subset$Habitat[data_subset$Habitat == "Coniferous"])
+jags.params <- c("mu1","mu2","delta","sigma1","sigma2")
+jags.inits <- function(){
+  list(mu1 = rnorm(0.001), mu2 = rnorm(0.001), sigma1 = rlnorm(1), sigma2 = rlnorm(1))
+}
+#Model
+mercuryttest <- function () {
+  for(i in 1:n1){
+    y1[i] ~ dnorm(mu1, tau1)
+  }
+  for(i in 1:n2){
+    y2[i] ~ dnorm(mu2, tau2)
+  }
+  mu1 ~ dnorm(0,0.001)
+  mu2 ~ dnorm(0, 0.001)
+  tau1 <- 1/(sigma1*sigma1)
+  sigma1 ~ dunif(0,1000)
+  tau2 <- 1/(sigma2*sigma2)
+  sigma2 ~ dunif(0,1000)
+  delta <- mu2 - mu1 #difference in mean water mercury
+}
+
+jagsfit <- jags(data = c("y1","y2","n1","n2"), inits = jags.inits, jags.params,
+                n.iter = 5000, model.file = mercuryttest)
+print(jagsfit,digits = 5)
+```
+
+We can visualize this by showing a histogram of the posterior distribution of delta, with the 95% credible interval shown as vertical red lines. 
+```{r, echo = FALSE}
+hist(jagsfit$BUGSoutput$sims.list$delta,
+     xlab = "Posterior distribution of the difference in mean methylmercury\nbetween coniferous and deciudous vernal pools",
+     main = NULL)
+abline(v = quantile(jagsfit$BUGSoutput$sims.list$delta,probs = c(0.025,0.975)), col = "red")
+```
+
+We can conclude that coniferous pools tend to have higher levels of methylmercury, but that the difference is not significant.
+
+###Mercury levels in amphibians.
+####Adults
+For adults, we need to choose which measure of mercury to use. More samples are missing blood mercury (n = 17) than are missing tissue mercury (n = 3). Therefore, for consistency, we should use tissue mercury as our measure.
+```{r}
+summary(data.df$Blood_MeHg[data.df$Life_Stage=="Adult"])
+summary(data.df$Tissue_MeHg[data.df$Life_Stage=="Adult"])
+```
+In addition, mercury levels measured in blood and tissue taken from the same individual show little
+correspondence and are not interchangeable. In this figure, mercury levels estimated from the same
+individual are connected by a line. Notice that tissue tends to be produce higher estimates of mercury load, but not always. Thus, mercury levels measured using the two different sample types aren't comparable.
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, error = FALSE}
+library(tidyr)
+library(dplyr)
+data.df[data.df$Life_Stage == "Adult",] %>%
+gather(., key = Meas_type,value = Mercury, 9:10) %>%
+  ggplot(., aes(x = Meas_type, y = Mercury, group = individual, color = Spp)) + geom_point() + geom_path() + 
+  xlab("Measurement type") + ylab("Mercury level")
+```
+
+Patterns of tissue methylmercury vary among pools and species.
+```{r,echo = FALSE, warning=FALSE}
+p2<-ggplot(data = subset(data.df, Spp == "WOFR"))
+p2 + geom_boxplot(aes(x = Pool, y = Tissue_MeHg)) + facet_wrap(~Habitat, scales = "free_x") + 
+  ylab("Methylmercury in Wood Frog tissue")
+
+p3<-ggplot(data = subset(data.df, Spp == "SPSA"))
+p3 + geom_boxplot(aes(x = Pool, y = Tissue_MeHg)) + facet_wrap(~Habitat, scales = "free_x") + 
+  ylab("Methylmercury in Spotted Salamander tissue")
+
+p4 <- ggplot(data = subset(data.df))
+p4 + geom_boxplot(aes(x = Spp, y = Tissue_MeHg)) + facet_wrap(~Habitat) + ylab ("Tissue methylmercury") + 
+  xlab("Species")
+```
+
+If we look at blood levels of methylmercury in adults:
+
+```{r,echo = FALSE, warning=FALSE}
+p2b<-ggplot(data = subset(data.df, Spp == "WOFR"))
+p2b + geom_boxplot(aes(x = Pool, y = Blood_MeHg)) + facet_wrap(~Habitat, scales = "free_x") + 
+  ylab("Methylmercury in Wood Frog blood")
+
+p3b<-ggplot(data = subset(data.df, Spp == "SPSA"))
+p3b + geom_boxplot(aes(x = Pool, y = Blood_MeHg)) + facet_wrap(~Habitat, scales = "free_x") + 
+  ylab("Methylmercury in Spotted Salamander blood")
+
+p4b <- ggplot(data = subset(data.df))
+p4b + geom_boxplot(aes(x = Spp, y = Blood_MeHg)) + facet_wrap(~Habitat) + ylab ("Blood methylmercury") + 
+  xlab("Species")
+```
+
+Neither species shows a strong relationship between levels of methylmercury in tissue and levels of methylmercury in the water at the time of the sample.
+
+```{r, echo = FALSE, warning=FALSE}
+p5 <- ggplot(data = subset(data.df, Life_Stage == "Adult"))
+p5 + geom_smooth(aes(x = Water_MeHg, y = Tissue_MeHg), method = "lm") + 
+  geom_point(aes(x = Water_MeHg, y = Tissue_MeHg, color = Pool)) + facet_wrap(~Spp)
+```
+
+We see the same relationship if we look at blood methylmercury:
+
+```{r, echo=FALSE,message=FALSE}
+p5b <- ggplot(data = subset(data.df, Life_Stage == "Adult"))
+p5b + geom_smooth(aes(x = Water_MeHg, y = Blood_MeHg), method = "lm") + 
+  geom_point(aes(x = Water_MeHg, y = Blood_MeHg, color = Pool)) + facet_wrap(~Spp)
+```
+
+####Larval stages
+Unclear pattern of accumulation of mercury for juvenile stages. Eggs tend to have low values for both species. For Wood Frog, mercury levels accumulate as might be expected if tissue mercury depends on cumulative exposure to water mercury. In Spotted Salamanders, however, early larvae in deciduous pools tend to have higher levels than late larvae.
+
+```{r, echo=FALSE,message=FALSE}
+p6 <- ggplot(data = subset(data.df, Life_Stage != "Adult"))
+p6 + geom_boxplot(aes(x = Life_Stage, y = Amphib_MeHg, color = Spp)) + 
+  scale_x_discrete(limits = c("Eggs","Early Larvae","Late Larvae")) + facet_wrap(~Habitat) +
+  theme(axis.text.x = element_text(angle = 340, vjust = 0.5)) + 
+  xlab("Life stage") + ylab("Methylmercury levels")
+```
+
+```{r, warning=FALSE, message=FALSE}
+p7 <- ggplot(data = subset(data.df, Life_Stage != "Adult"))
+p7 + geom_boxplot(aes(x = Life_Stage, y = Amphib_MeHg, color = Spp)) + 
+  scale_x_discrete(limits = c("Eggs","Early Larvae","Late Larvae")) +
+  theme(axis.text.x = element_text(angle = 340, vjust = 0.5)) + 
+  xlab("Life stage") + ylab("Methylmercury levels")
+```
+
+The odd pattern of higher mercury in early-stage larvae for SPSA doesn't appear
+to be strictly a pool effect. For example, the only two pools with early larvae
+sampled - Downer and Mauran - also show a decreased level of mercury in late-stage larvae.
+
+```{r, warning=FALSE, message=FALSE}
+p8 <- ggplot(data = subset(data.df, Life_Stage != "Adult"))
+p8 + geom_point(aes(x = Life_Stage, y = Amphib_MeHg, color = Pool)) + 
+  scale_x_discrete(limits = c("Eggs","Early Larvae","Late Larvae")) +
+  theme(axis.text.x = element_text(angle = 340, vjust = 0.5)) + 
+  xlab("Life stage") + ylab("Methylmercury levels") + facet_wrap(~Spp)
+```
+
+There is no consistent relationship between water mercury levels and levels of methylmercury in the 
+tissue or blood of larval amphibians. There is a weak tendendcy for Spotted Salamander larvae to show
+a negative relationship with water mercury, but Wood Frogs show a contrasting pattern: lower levels of
+mercury in the body when water mercury is higher.
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+p9 <- ggplot(data = subset(data.df, Life_Stage != "Adult"))
+p9 + geom_smooth(aes(x = Water_MeHg, y = Amphib_MeHg), method = "lm") + 
+  geom_point(aes(x = Water_MeHg, y = Amphib_MeHg, color = Pool)) + facet_wrap(~Spp+Life_Stage, scales = "free")
+```
+
+```{r, warning=FALSE, message=FALSE, warning=FALSE}
+p10 <- ggplot(data = subset(data.df, Life_Stage != "Adult"))
+p10 + geom_smooth(aes(x = Water_MeHg, y = Amphib_MeHg), method = "lm") + 
+  geom_point(aes(x = Water_MeHg, y = Amphib_MeHg, color = Life_Stage)) + facet_wrap(~Spp)
+```
+
+##Exploratory analysis summary
+1. A non-significant trend exists towards higher levels of mercury in water of coniferous pools.
+2. Adult amphibians show no relationship between mercury in the body and mercury in the water. Adults of both species tend to have similar levels of mercury in the body.
+3. Wood Frogs show a trend towards increasing mercury in the body as they mature, but Spotted Salamanders do not. In fact, for Spotted Salamanders, levels of mercury are highest in the early larval stage.
+4. Spotted Salamanders have lower levels of mercury in their body when water mercury is higher, and this pattern holds across life stages (i.e., it is not confounded by stage of life).
+5. Wood Frogs have higher levels of mercury in their body when water mercury is higher, and this pattern holds across life stages.
+6. Thus, mercury levels in the body vary as a function of water mercury*species + life stage.
