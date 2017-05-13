@@ -7,14 +7,28 @@ data.df$Sample_Date2 <- as.POSIXct(data.df$Sample_Date, format = "%m/%d/%y") #cr
 data.df$Year <- year(data.df$Sample_Date2) #Create a year variable to allow us to separate the 2016 observation.
 data.df$individual <- seq(from = 1,to = nrow(data.df), by = 1) #create a unique identifier for each individual.
 
+##MeHg
+###No clear temporal pattern.
 p1<-ggplot(data = subset(data.df, Year == 2015))
 p1 + geom_smooth(aes(x = Sample_Date2, y = Water_MeHg), method = "lm") + 
   geom_point(aes(x = Sample_Date2, y = Water_MeHg, color = Pool)) + facet_wrap(~Habitat)
 
-#Water mercury levels tend to be higher in Coniferous pools, but substantial variation exists among pools.
+##Water_TotalHg
+###Decreases over time. Higher in coniferous forests.
+p1a <-ggplot(data = subset(data.df, Year == 2015))
+p1a + geom_smooth(aes(x = Sample_Date2, y = Water_THg), method = "lm") + 
+  geom_point(aes(x = Sample_Date2, y = Water_THg, color = Pool)) + facet_wrap(~Habitat)
+
+#Water Me_mercury levels tend to be higher in Coniferous pools, but substantial variation exists among pools.
 p1 + geom_line(aes(x = Sample_Date2, y = Water_MeHg, color = Pool)) + 
   geom_point(aes(x = Sample_Date2, y = Water_MeHg, color = Pool)) + facet_wrap(~Habitat) + 
   geom_smooth(aes(x = Sample_Date2, y = Water_MeHg),method = "lm") + ylab("Water methylmercury levels") + 
+  xlab("Sample date") + theme(axis.text.x = element_text(angle = 340, vjust = 0.5))
+
+#Similar for Total mercury in water.
+p1a + geom_line(aes(x = Sample_Date2, y = Water_THg, color = Pool)) + 
+  geom_point(aes(x = Sample_Date2, y = Water_THg, color = Pool)) + facet_wrap(~Habitat) + 
+  geom_smooth(aes(x = Sample_Date2, y = Water_THg),method = "lm") + ylab("Water total mercury levels") + 
   xlab("Sample date") + theme(axis.text.x = element_text(angle = 340, vjust = 0.5))
 
 summary(data.df)
@@ -96,6 +110,53 @@ hist(jagsfit$BUGSoutput$sims.list$delta,
      main = NULL)
 abline(v = quantile(jagsfit$BUGSoutput$sims.list$delta,probs = c(0.025,0.975)), col = "red")
 
+##Repeat above analysis for Total mercury:
+#Model without assuming equal variances:
+#Data
+data_subsetThg <- subset(data.df, !duplicated(Water_THg))
+data_subsetThg <- subset(data_subsetThg, (!is.na(data_subsetThg$Water_THg)))
+x1 <- data_subsetThg$Habitat[data_subsetThg$Habitat == "Deciduous"]
+x2 <- data_subsetThg$Habitat[data_subsetThg$Habitat == "Coniferous"]
+y1 <- data_subsetThg$Water_MeHg[data_subsetThg$Habitat == "Deciduous"]
+y2 <- data_subsetThg$Water_MeHg[data_subsetThg$Habitat == "Coniferous"]
+n1 <- length(data_subsetThg$Habitat[data_subsetThg$Habitat == "Deciduous"])
+n2 <- length(data_subsetThg$Habitat[data_subsetThg$Habitat == "Coniferous"])
+jags.params <- c("mu1","mu2","delta","sigma1","sigma2")
+jags.inits <- function(){
+  list(mu1 = rnorm(0.001), mu2 = rnorm(0.001), sigma1 = rlnorm(1), sigma2 = rlnorm(1))
+}
+#Model
+totalmercuryttest <- function () {
+  for(i in 1:n1){
+    y1[i] ~ dnorm(mu1, tau1)
+  }
+  for(i in 1:n2){
+    y2[i] ~ dnorm(mu2, tau2)
+  }
+  mu1 ~ dnorm(0,0.001)
+  mu2 ~ dnorm(0, 0.001)
+  tau1 <- 1/(sigma1*sigma1)
+  sigma1 ~ dunif(0,1000)
+  tau2 <- 1/(sigma2*sigma2)
+  sigma2 ~ dunif(0,1000)
+  delta <- mu2 - mu1 #difference in mean water mercury
+}
+
+jagsfittotalmercuryttest <- jags(data = c("y1","y2","n1","n2"), inits = jags.inits, jags.params,
+                                 n.iter = 50000, model.file = totalmercuryttest)
+print(jagsfittotalmercuryttest,digits = 5)
+traceplot(jagsfittotalmercuryttest)
+library(mcmcplots)
+jagsfittotalmercuryttest.mcmc <- as.mcmc(jagsfittotalmercuryttest)
+plot(jagsfittotalmercuryttest.mcmc, trace = F)
+denplot(jagsfittotalmercuryttest.mcmc,"delta", ci = 0.95)
+densityplot(jagsfittotalmercuryttest.mcmc)
+
+hist(jagsfittotalmercuryttest$BUGSoutput$sims.list$delta,
+     xlab = "Posterior distribution of the difference in mean total mercury\nbetween coniferous and deciudous vernal pools",
+     main = NULL)
+abline(v = quantile(jagsfittotalmercuryttest$BUGSoutput$sims.list$delta,probs = c(0.025,0.975)), col = "red")
+
 
 ##Compare mercury in amphibians among pools. Differences within-species and between habitats are nominal. 
 ##SPSA tend to have higher levels of MeHg, with the difference most pronounced in the deciduous habitat.
@@ -136,6 +197,7 @@ p4 + geom_boxplot(aes(x = Spp, y = Tissue_MeHg)) + facet_wrap(~Habitat) + ylab (
 p5 <- ggplot(data = subset(data.df, Year == 2015 & Life_Stage == "Adult"))
 p5 + geom_smooth(aes(x = Water_MeHg, y = Tissue_MeHg), method = "lm") + 
   geom_point(aes(x = Water_MeHg, y = Tissue_MeHg, color = Pool)) + facet_wrap(~Spp)
+
 
 #Unclear pattern of accumulation of mercury for juvenile stages. Eggs tend to have low values for both species.
 #For Wood Frog, mercury levels accumulate as might be expected if tissue mercury depends on cumulative
