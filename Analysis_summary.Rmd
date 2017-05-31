@@ -35,7 +35,7 @@ mytable
 
 
 ## Exploratory analysis
-### Mercury levels in water by pool, over time
+### Methlymercury levels in water by pool, over time
 Levels of methylmercury in water differ among pools and habitats and by time of sample. In general, coniferous pools have higher levels of methylmercury, but variation among pools is substantial. In addition, a seasonal trend is evident in pools surrounded by deciduous forest, but not among pools surrounded by coniferous forest.
 
 ```{r, echo=FALSE}
@@ -46,6 +46,15 @@ p1 + geom_smooth(aes(x = Sample_Date2, y = Water_MeHg), method = "lm") +
   geom_line(aes (x = Sample_Date2, y = Water_MeHg, color = Pool)) + facet_wrap(~Habitat) + 
   xlab("Sample Date") + ylab("Water methlymercury") + 
   theme(axis.text.x = element_text(angle = 340, vjust = 0.5))
+```
+Total mercury levels in water tend to be higher in coniferous pools and tend to decrease over the course of a season. However, sample size is substantially lower for measures of total mercury because not every sampling period has an associated total mercury level.
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+p1a <-ggplot(data = subset(data.df, Year == 2015))
+p1a + geom_line(aes(x = Sample_Date2, y = Water_THg, color = Pool)) +
+  geom_point(aes(x = Sample_Date2, y = Water_THg, color = Pool)) + 
+  geom_smooth(aes(x = Sample_Date2, y = Water_THg), method = "lm") + facet_wrap(~Habitat) + 
+  ylab("Water total lmercury levels") + 
+  xlab("Sample date") + theme(axis.text.x = element_text(angle = 340, vjust = 0.5))
 ```
 
 Performing a t-test assuming unequal variances, we find that the 95% credible interval for the difference in methylmercury (the parameter named "delta") between the two habitats includes zero (-0.00013, 0.00131).
@@ -96,6 +105,50 @@ abline(v = quantile(jagsfit$BUGSoutput$sims.list$delta,probs = c(0.025,0.975)), 
 ```
 
 We can conclude that coniferous pools tend to have higher levels of methylmercury, but that the difference is not significant.
+
+Repeating the analysis using total mercury levels in water produces a similar result: the difference in total mercury between coniferous and deciduous pools is approximately zero (mean difference = 0.00026, 95% credible interval = -0.00057 - 0.00108).
+```{r, echo = FALSE}
+data_subsetThg <- subset(data.df, !duplicated(Water_THg))
+data_subsetThg <- subset(data_subsetThg, (!is.na(data_subsetThg$Water_THg)))
+x1 <- data_subsetThg$Habitat[data_subsetThg$Habitat == "Deciduous"]
+x2 <- data_subsetThg$Habitat[data_subsetThg$Habitat == "Coniferous"]
+y1 <- data_subsetThg$Water_MeHg[data_subsetThg$Habitat == "Deciduous"]
+y2 <- data_subsetThg$Water_MeHg[data_subsetThg$Habitat == "Coniferous"]
+n1 <- length(data_subsetThg$Habitat[data_subsetThg$Habitat == "Deciduous"])
+n2 <- length(data_subsetThg$Habitat[data_subsetThg$Habitat == "Coniferous"])
+jags.params <- c("mu1","mu2","delta","sigma1","sigma2")
+jags.inits <- function(){
+  list(mu1 = rnorm(0.001), mu2 = rnorm(0.001), sigma1 = rlnorm(1), sigma2 = rlnorm(1))
+}
+#Model
+totalmercuryttest <- function () {
+  for(i in 1:n1){
+    y1[i] ~ dnorm(mu1, tau1)
+  }
+  for(i in 1:n2){
+    y2[i] ~ dnorm(mu2, tau2)
+  }
+  mu1 ~ dnorm(0,0.001)
+  mu2 ~ dnorm(0, 0.001)
+  tau1 <- 1/(sigma1*sigma1)
+  sigma1 ~ dunif(0,1000)
+  tau2 <- 1/(sigma2*sigma2)
+  sigma2 ~ dunif(0,1000)
+  delta <- mu2 - mu1 #difference in mean water mercury
+}
+
+jagsfittotalmercuryttest <- jags(data = c("y1","y2","n1","n2"), inits = jags.inits, jags.params,
+                                 n.iter = 50000, model.file = totalmercuryttest)
+print(jagsfittotalmercuryttest,digits = 5)
+```
+
+```{r, echo = FALSE}
+hist(jagsfittotalmercuryttest$BUGSoutput$sims.list$delta,
+     xlab = "Posterior distribution of the difference in mean total mercury\nbetween coniferous and deciudous vernal pools",
+     main = NULL)
+abline(v = quantile(jagsfittotalmercuryttest$BUGSoutput$sims.list$delta,probs = c(0.025,0.975)), col = "red")
+```
+
 
 ###Mercury levels in amphibians.
 ####Adults
@@ -219,3 +272,400 @@ p10 + geom_smooth(aes(x = Water_MeHg, y = Amphib_MeHg), method = "lm") +
 4. Spotted Salamanders have lower levels of mercury in their body when water mercury is higher, and this pattern holds across life stages (i.e., it is not confounded by stage of life).
 5. Wood Frogs have higher levels of mercury in their body when water mercury is higher, and this pattern holds across life stages.
 6. Thus, mercury levels in the body vary as a function of water mercury*species + life stage.
+
+##Formal analysis.
+###Juvenile life stages.
+For a more formal analysis, I compared 3 linear models within a Bayesian framework. For the juvenile life stages, these models included:
+1. Amphibian mercury ~ species*water methlymercury. In this model, mercury level measured in amphibian larvae reflects an interaction between species and water mercury levels.
+```{r, echo = FALSE}
+#Data
+data_subset2 <- subset(data.df, Life_Stage != "Adult")
+data_subset2 <- subset(data_subset2, (!is.na(data_subset2$Amphib_MeHg)))
+spp <- data_subset2$Spp
+hg <- log(data_subset2$Amphib_MeHg)
+waterhg <- log(data_subset2$Water_MeHg) 
+n <- nrow(data_subset2)
+n.groups <- length(levels(data_subset2$Spp))
+jags.params <- c("alpha","beta", "sigma")
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+#Model
+mercuryanova <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha[spp[i]] + beta[spp[i]]*waterhg[i]
+  }
+  for(i in 1:n.groups){
+  alpha[i] ~ dnorm(0, 1e-11) #choice of a prior is key - if the SD of the distribution >1e-10, results bad. Assume this is
+  beta [i] ~ dnorm(0, 1e-11)
+  }
+  sigma ~ dunif(0,100)
+  tau <- 1/(sigma*sigma)
+}
+
+jagsfitm1 <- jags(data = c("spp","hg","waterhg","n","n.groups"), inits = jags.inits, jags.params,
+                n.iter = 50000, model.file = mercuryanova)
+print(jagsfitm1,digits = 5)
+```
+2. Amphibian mercury ~ species*water methlymercury + life stage. In this model, mercury level measured in amphibian larvae reflects an interaction between species and water mercury levels and an additive effect of life stage. 
+```{r}
+spp <- data_subset2$Spp
+hg <- log(data_subset2$Amphib_MeHg)
+stage <- data_subset2$Life_Stage
+stage <- droplevels(stage)
+waterhg <- log(data_subset2$Water_MeHg) #could consider scaling this to get smaller Betas
+n <- nrow(data_subset2)
+n.groups <- length(levels(data_subset2$Spp))
+n.stages <- 3
+jags.params <- c("alpha","beta.spp", "beta.stage", "sigma")
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+#Model
+logmercuryanova2 <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]]
+  }
+  for(i in 1:n.groups){
+    alpha[i] ~ dnorm(0, 0.001) 
+    beta.spp[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n.stages){
+    beta.stage[i] ~ dnorm(0,0.001)
+  }
+  sigma ~ dunif(0,100)
+  tau <- 1/(sigma*sigma)
+}
+
+jagsfitlogm2 <- jags(data = c("spp","hg","waterhg","n","n.groups","stage", "n.stages"), inits = jags.inits, jags.params,
+                n.iter = 20000, model.file = logmercuryanova2)
+print(jagsfitlogm2,digits = 5)
+```
+3. Amphibian mercury ~ species*water methlymercury + life stage + habitat. In this model, mercury level measured in amphibian larvae reflects an interaction between species and water mercury levels and additive effects of life stage and habitat (deciduous vs coniferous). 
+```{r, echo = FALSE}
+spp <- data_subset2$Spp
+hg <- log(data_subset2$Amphib_MeHg)
+stage <- data_subset2$Life_Stage
+stage <- droplevels(stage)
+waterhg <- log(data_subset2$Water_MeHg) #could consider scaling this to get smaller Betas
+habitat <- data_subset2$Habitat
+n <- nrow(data_subset2)
+n.groups <- length(levels(data_subset2$Spp))
+n.habitat <- 2
+n.stages <- 3
+jags.params <- c("alpha","beta.waterhg","beta.spp", "beta.stage", "beta.habitat","sigma","bpvalue") 
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+#Model Amphib_MeHg ~ Spp*Water_MeHg + Life_Stage + Habitat
+logmercuryanova3 <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.waterhg*waterhg[i] + beta.stage[stage[i]] + beta.habitat[habitat[i]]
+    esthg[i] <- exp(mu[i])
+  }
+  for(i in 1:n.groups){
+    alpha[i] ~ dnorm(0, 0.001) 
+    beta.spp[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n.stages){
+    beta.stage[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n.habitat){
+    beta.habitat[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n){
+    residual[i] <- hg[i]-mu[i]
+    predicted[i] <- mu[i]
+    sq[i] <- pow(residual[i],2)
+    y.new[i] ~ dnorm(mu[i], tau)
+    sq.new[i] <- pow(y.new[i] - predicted[i],2)
+  }
+  fit<- sum(sq[])
+  fit.new <- sum(sq.new[])
+  test <- step(fit.new - fit)
+  bpvalue <- mean(test)
+  sigma ~ dunif(0,100)
+  tau <- 1/(sigma*sigma)
+  beta.waterhg ~ dnorm(0,0.001)
+}
+
+jagsfitlogm3 <- jags(data = c("spp","hg","waterhg","habitat","n","n.groups","n.habitat","stage", "n.stages"), inits = jags.inits, jags.params,
+                n.iter = 20000, model.file = logmercuryanova3)
+
+print(jagsfitlogm3,digits = 5) 
+```
+
+The best model is model 2 (it has the smallest Deviance Information Criterion (DIC), similar to AIC in that it reflects a balance between model fit and parsimony). In other words, mercury levels in larval amphibians depend on mercury levels in the water (although not in the expected way!) and on the life stage. 
+
+Adding an effect of habitat increases the DIC, indicating that this parameter is not useful in explaining variation in mercury levels in amphibians:
+```{r}
+cat(paste(c("DIC for Spp*WaterHg:"), jagsfitm1$BUGSoutput$DIC))
+cat(paste(c("DIC for Spp*WaterHg + Stage"), jagsfitlogm2$BUGSoutput$DIC))
+cat(paste(c("DIC for Spp*WaterHg + Stage + Habitat:"),jagsfitlogm3$BUGSoutput$DIC))
+```
+
+Using that model for inference, we can generate predictions and figures that show the expected relationships.
+```{r,echo = FALSE}
+##Generating predictions for plotting and inference:
+spp <- data_subset2$Spp
+hg <- log(data_subset2$Amphib_MeHg)
+stage <- data_subset2$Life_Stage
+stage <- droplevels(stage)
+waterhg <- log(data_subset2$Water_MeHg)
+waterhgseq <- seq(min(waterhg), max(waterhg),length.out = 111)
+n <- nrow(data_subset2)
+n.groups <- length(levels(data_subset2$Spp))
+n.stages <- 3
+jags.params <- c("alpha","beta.spp", "beta.stage", "waterhg","waterhgseq","sigma", "mu","predWOFRegg",
+                 "predWOFRearly","predWOFRlate","predSPSAegg","predSPSAearly","predSPSAlate","fit",
+                 "fit.new","bpvalue","residual","predicted") #added mu to monitor predictions!
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+#Model Amphib_MeHg ~ Spp*Water_MeHg + Life_Stage
+predmodel <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]]
+    #esthg[i] <- exp(mu[i])
+    predWOFRegg[i] <- alpha[spp[5]] + beta.spp[spp[5]]*waterhgseq[i] + beta.stage[stage[1]]
+    predWOFRearly[i] <- alpha[spp[5]] + beta.spp[spp[5]]*waterhgseq[i] + beta.stage[stage[5]]
+    predWOFRlate[i] <- alpha[spp[5]] + beta.spp[spp[5]]*waterhgseq[i] + beta.stage[stage[13]]
+    predSPSAegg[i] <- alpha[spp[1]] + beta.spp[spp[1]]*waterhgseq[i] + beta.stage[stage[1]]
+    predSPSAearly[i] <- alpha[spp[1]] + beta.spp[spp[1]]*waterhgseq[i] + beta.stage[stage[5]]
+    predSPSAlate[i] <- alpha[spp[1]] + beta.spp[spp[1]]*waterhgseq[i] + beta.stage[stage[13]]
+  }
+  for(i in 1:n.groups){
+    alpha[i] ~ dnorm(0, 0.001) 
+    beta.spp[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n.stages){
+    beta.stage[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n){
+    residual[i] <- hg[i]-mu[i]
+    predicted[i] <- mu[i]
+    sq[i] <- pow(residual[i],2)
+    y.new[i] ~ dnorm(mu[i], tau)
+    sq.new[i] <- pow(y.new[i] - predicted[i],2)
+  }
+  fit<- sum(sq[])
+  fit.new <- sum(sq.new[])
+  test <- step(fit.new - fit)
+  bpvalue <- mean(test)
+  sigma ~ dunif(0,100)
+  tau <- 1/(sigma*sigma)
+}
+
+jagsfitpredmodel <- jags(data = c("spp","hg","waterhg","n","n.groups","stage", "n.stages","waterhgseq"), inits = jags.inits, jags.params,
+                     n.iter = 20000, model.file = predmodel)
+
+pred.matrix <- matrix(nrow = 111,ncol=19,dimnames = list(c(),c("WOFRegg","WOFRegglowci","WOFRegghighci",
+                                                      "SPSAegg","SPSAegglowci","SPSAegghighci",
+                                                      "WOFRearly","WOFRearlylowci","WOFRearlyhighci",
+                                                      "SPSAearly","SPSAearlylowci","SPSAearlyhighci",
+                                                      "WOFRlate","WOFRlatelowci","WOFRlatehighci",
+                                                      "SPSAlate","SPSAlatelowci","SPSAlatehighci",
+                                                      "WaterHg")))
+
+for (i in 1:111){
+  pred.matrix[i,2] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predWOFRegg[,i],probs = 0.025)
+  pred.matrix[i,3] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predWOFRegg[,i],probs = 0.975)
+  pred.matrix[i,5] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predSPSAegg[,i],probs = 0.025)
+  pred.matrix[i,6] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predSPSAegg[,i],probs = 0.975)
+  pred.matrix[i,8] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predWOFRearly[,i],probs = 0.025)
+  pred.matrix[i,9] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predWOFRearly[,i],probs = 0.975)
+  pred.matrix[i,11] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predSPSAearly[,i],probs = 0.025)
+  pred.matrix[i,12] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predSPSAearly[,i],probs = 0.975)
+  pred.matrix[i,14] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predWOFRlate[,i],probs = 0.025)
+  pred.matrix[i,15] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predWOFRlate[,i],probs = 0.975)
+  pred.matrix[i,17] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predSPSAlate[,i],probs = 0.025)
+  pred.matrix[i,18] <- quantile(jagsfitpredmodel$BUGSoutput$sims.list$predSPSAlate[,i],probs = 0.975)
+}
+pred.matrix[,1] <- jagsfitpredmodel$BUGSoutput$median$predWOFRegg
+pred.matrix[,4] <- jagsfitpredmodel$BUGSoutput$median$predSPSAegg
+pred.matrix[,7] <- jagsfitpredmodel$BUGSoutput$median$predWOFRearly
+pred.matrix[,10] <- jagsfitpredmodel$BUGSoutput$median$predSPSAearly
+pred.matrix[,13] <- jagsfitpredmodel$BUGSoutput$median$predWOFRlate
+pred.matrix[,16] <- jagsfitpredmodel$BUGSoutput$median$predSPSAlate
+pred.matrix[,19] <- waterhgseq
+```
+
+Predictions for each life stage, from the best model:
+```{r, echo = FALSE}
+##All stages
+par(mfrow = c(3,2))
+par(mar = c(4,5,1,1))
+##Eggs
+plot(exp(pred.matrix[,19]),exp(pred.matrix[,"WOFRegg"]), type = "l", xlab = "Mercury (ng/ml), water",
+     ylab = "Mercury (ng/g),\n Wood Frog eggs", ylim = c(0,12))
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"WOFRegglowci"]), type = "l",lty = 2)
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"WOFRegghighci"]), type = "l", lty = 2)
+#Add observed values
+par(new=T)
+plot(data_subset2$Water_MeHg[data_subset2$Spp=="WOFR"&data_subset2$Life_Stage=="Eggs"],data_subset2$Amphib_MeHg[data_subset2$Spp=="WOFR"&data_subset2$Life_Stage=="Eggs"],
+     xaxt="n",yaxt="n",xlab="",ylab="")
+par(new=F)
+
+plot(exp(pred.matrix[,19]),exp(pred.matrix[,"SPSAegg"]), type = "l", xlab = "Mercury (ng/ml), water",
+     ylab = "Mercury (ng/g),\n Spotted Salamander eggs", ylim = c(0,12))
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"SPSAegglowci"]), type = "l", lty = 2)
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"SPSAegghighci"]), type = "l", lty = 2)
+par(new=T)
+plot(data_subset2$Water_MeHg[data_subset2$Spp=="SPSA"&data_subset2$Life_Stage=="Eggs"],data_subset2$Amphib_MeHg[data_subset2$Spp=="SPSA"&data_subset2$Life_Stage=="Eggs"],
+     xaxt="n",yaxt="n",xlab="",ylab="")
+par(new=F)
+##Early larvae
+plot(exp(pred.matrix[,19]),exp(pred.matrix[,"WOFRearly"]), type = "l", xlab = "Mercury (ng/ml), water",
+     ylab = "Mercury (ng/g),\n Wood Frog early larvae", ylim = c(25,250))
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"WOFRearlylowci"]), type = "l",lty = 2)
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"WOFRearlyhighci"]), type = "l", lty = 2)
+par(new=T)
+plot(data_subset2$Water_MeHg[data_subset2$Spp=="WOFR"&data_subset2$Life_Stage=="Early Larvae"],data_subset2$Amphib_MeHg[data_subset2$Spp=="WOFR"&data_subset2$Life_Stage=="Early Larvae"],
+     xaxt="n",yaxt="n",xlab="",ylab="")
+par(new=F)
+
+plot(exp(pred.matrix[,19]),exp(pred.matrix[,"SPSAearly"]), type = "l", xlab = "Mercury (ng/ml), water",
+     ylab = "Mercury (ng/g),\n Spotted Salamander early larvae", ylim = c(25,250))
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"SPSAearlylowci"]), type = "l", lty = 2)
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"SPSAearlyhighci"]), type = "l", lty = 2)
+par(new=T)
+plot(data_subset2$Water_MeHg[data_subset2$Spp=="SPSA"&data_subset2$Life_Stage=="Early Larvae"],data_subset2$Amphib_MeHg[data_subset2$Spp=="SPSA"&data_subset2$Life_Stage=="Early Larvae"],
+     xaxt="n",yaxt="n",xlab="",ylab="")
+par(new=F)
+##Late larvae
+plot(exp(pred.matrix[,19]),exp(pred.matrix[,"WOFRlate"]), type = "l", xlab = "Mercury (ng/ml), water",
+     ylab = "Mercury (ng/g),\n Wood Frog late larvae", ylim = c(50,300))
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"WOFRlatelowci"]), type = "l",lty = 2)
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"WOFRlatehighci"]), type = "l", lty = 2)
+par(new=T)
+plot(data_subset2$Water_MeHg[data_subset2$Spp=="WOFR"&data_subset2$Life_Stage=="Late Larvae"],data_subset2$Amphib_MeHg[data_subset2$Spp=="WOFR"&data_subset2$Life_Stage=="Late Larvae"],
+     xaxt="n",yaxt="n",xlab="",ylab="")
+par(new=F)
+
+plot(exp(pred.matrix[,19]),exp(pred.matrix[,"SPSAlate"]), type = "l", xlab = "Mercury (ng/ml), water",
+     ylab = "Mercury (ng/g),\n Spotted Salamander late larvae", ylim = c(50,300))
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"SPSAlatelowci"]), type = "l", lty = 2)
+lines(exp(pred.matrix[,"WaterHg"]),exp(pred.matrix[,"SPSAlatehighci"]), type = "l", lty = 2)
+par(new=T)
+plot(data_subset2$Water_MeHg[data_subset2$Spp=="SPSA"&data_subset2$Life_Stage=="Late Larvae"],data_subset2$Amphib_MeHg[data_subset2$Spp=="SPSA"&data_subset2$Life_Stage=="Late Larvae"],
+     xaxt="n",yaxt="n",xlab="",ylab="")
+par(new=F)
+
+```
+
+###Adults.
+For adults, there are only 2 sensible models:
+1) Tissue_MeHg ~ Species
+2) Tissue_MeHg ~ Species + Habitat
+
+I did not include any models with an effect of water mercury on tissue mercury because it is not biologically clear why this relationship should exist. Adults of both species are not resident within the pool, so I would not expect to find any effect of water mercury on the tissue mercury. Exploratory analyses support this assumption.
+
+As with the juveniles, I analyzed both models in a Bayesian framework.
+First, the model that simply partitions variation among species:
+```{r, echo = FALSE}
+data_subset4 <- subset(data.df, Life_Stage=="Adult")
+data_subset4 <- subset(data_subset4, (!is.na(data_subset4$Tissue_MeHg)))
+
+spp <- data_subset4$Spp
+hg <- log(data_subset4$Tissue_MeHg)
+n <- nrow(data_subset4)
+habitat <- data_subset4$Habitat
+habitat <- droplevels(habitat)
+n.groups <- length(levels(data_subset4$Spp))
+n.habitats <- 2
+jags.params <- c("alpha","sigma","delta","wofr","spsa") #added mu to monitor predictions!
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+#Model Tissue_MeHg ~ Spp
+adults.m1 <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha[spp[i]]
+  }
+  for(i in 1:n.groups){
+    alpha[i] ~ dnorm(0, 0.001) 
+  }
+  sigma ~ dunif(0,100)
+  delta <- exp(alpha[1]) - exp(alpha[2])
+  tau <- 1/(sigma*sigma)
+  wofr <- exp(alpha[spp[1]])
+  spsa <- exp(alpha[spp[5]])
+}
+
+jagsfitadults.m1 <- jags(data = c("spp","hg","n","n.groups"), inits = jags.inits, jags.params,
+                     n.iter = 50000, model.file = adults.m1)
+print(jagsfitadults.m1,digits = 5)
+```
+
+Next, the model that includes an effect of habitat type:
+```{r, echo = FALSE}
+##Tissue_MeHg~Spp + Habitat
+spp <- data_subset4$Spp
+hg <- log(data_subset4$Tissue_MeHg)
+n <- nrow(data_subset4)
+habitat <- data_subset4$Habitat
+habitat <- droplevels(habitat)
+n.groups <- length(levels(data_subset4$Spp))
+n.habitats <- 2
+n.spp <- 2
+jags.params <- c("group.mean","sigma") #added mu to monitor predictions!
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+#Model Tissue_MeHg ~ Spp + Habitat
+adults.m2 <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- group.mean[spp[i],habitat[i]] 
+  }
+  for(i in 1:n.spp){
+    for(j in 1:n.habitats) {
+    group.mean[i,j] ~ dnorm(0, 0.001) 
+    }
+  }
+  sigma ~ dunif(0,100)
+  tau <- 1/(sigma*sigma)
+}
+jagsfitadults.m2 <- jags(data = c("spp","hg","n","n.spp","habitat","n.habitats"), inits = jags.inits, jags.params,
+                         n.iter = 20000, model.file = adults.m2)
+print(jagsfitadults.m2,digits = 5)
+```
+
+Adding an effect of habitat does not improve the model fit, suggesting that habitat is not an important predictor of variation in mercury levels among adult amphibians.
+```{r, echo = FALSE}
+cat(paste("DIC, Model 1:",jagsfitadults.m1$BUGSoutput$DIC,"\n"))
+cat(paste("DIC, Model 2:",jagsfitadults.m2$BUGSoutput$DIC))
+```
+The conclusion? Adult Wood Frogs have lower mercury levels than Spotted Salamanders, and habitat does not explain significant amounts of variation.
+
+```{r, echo = FALSE}
+#Mean difference between Wood Frog and Spotted Salamander mercury levels:
+cat(paste("Mean difference, Spotted Salamander - Wood Frog:", jagsfitadults.m1$BUGSoutput$mean$delta,"\n"))
+#95% CI on the difference:
+cat(paste("95% CI:",quantile(jagsfitadults.m1$BUGSoutput$sims.list$delta,0.025),"-",
+          quantile(jagsfitadults.m1$BUGSoutput$sims.list$delta,0.975)))
+```
+
+```{r, echo = FALSE}
+bars <- barplot(c(jagsfitadults.m1$BUGSoutput$median$wofr,jagsfitadults.m1$BUGSoutput$median$spsa), 
+        names = c("Wood Frog", "Spotted Salamander"), xlab = "Species",
+        ylab = "Tissue mercury (ng/g)", ylim = c(0,90))
+segments(bars,c(quantile(jagsfitadults.m1$BUGSoutput$sims.list$spsa,0.025),
+                quantile(jagsfitadults.m1$BUGSoutput$sims.list$spsa,0.975)),bars,
+                c(quantile(jagsfitadults.m1$BUGSoutput$sims.list$wofr,0.025),
+                  quantile(jagsfitadults.m1$BUGSoutput$sims.list$wofr,0.975)))
+```
+
+##Conclusion
+Mercury levels - either methylmercury or total mercury - in the water of deciduous and coniferous vernal pools do not differ in this sample of pools. In part, the lack of variation probably reflects the rather small sample size. 
+
+Methylmercury levels in larval stages differ among species, among life stages, and as a function of water mercury. Eggs have the lowest levels of methylmercury, early larvae the highest, and late larvae are intermediate in methylmercury loads.
+
+For Spotted Salamanders, methylmercury loads tended to decrease as water methylmercury increased. For Wood Frogs, I found no relationship between methylmercury load and water methylmercury levels.
+
+Among adults, tissue methylmercury varied among species. Spotted Salamanders had higher average loads than did Wood Frogs. Habitat did not explain variation in mercury loads among samples.
