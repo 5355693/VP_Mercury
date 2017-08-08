@@ -816,3 +816,7 @@ jagsfitadults.m2 <- jags(data = c("spp","hg","n","n.spp","habitat","n.habitats")
 print(jagsfitadults.m2,digits = 5)
 traceplot(jagsfitadults.m1)
 jagsfitadults.m2$BUGSoutput$DIC
+
+##New variables to consider: DOC, S, Al, and pH. Let's explore them:
+str(data.df)
+
