@@ -819,4 +819,392 @@ jagsfitadults.m2$BUGSoutput$DIC
 
 ##New variables to consider: DOC, S, Al, and pH. Let's explore them:
 str(data.df)
+summary(data.df)
+hist(data.df$Water_pH)
+hist(data.df$Water_DOC)
+hist(data.df$Water_S)
+hist(data.df$Water_Al)
+
+##Best previous model:
+#Model Amphib_MeHg ~ Spp*Water_MeHg + Life_Stage
+##cat(paste(c("DIC for Spp*WaterHg:"), jagsfitm1$BUGSoutput$DIC))
+##cat(paste(c("DIC for Spp*WaterHg + Stage"), jagsfitlogm2$BUGSoutput$DIC))
+##cat(paste(c("DIC for Spp*WaterHg + Stage + Habitat:"),jagsfitlogm3$BUGSoutput$DIC))
+spp <- data_subset2$Spp
+hg <- log(data_subset2$Amphib_MeHg)
+stage <- data_subset2$Life_Stage
+stage <- droplevels(stage)
+waterhg <- log(data_subset2$Water_MeHg)
+waterph <- data_subset2$Water_pH
+n <- nrow(data_subset2)
+n.groups <- length(levels(data_subset2$Spp))
+n.stages <- 3
+jags.params <- c("alpha","beta.spp", "beta.stage", "beta.waterph","waterhg","waterph", "sigma", "mu","esthg",
+                 "fit","fit.new","bpvalue","residual","predicted") #added mu to monitor predictions!
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+
+logmercury_pH <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]] + beta.waterph*waterph[i]
+    esthg[i] <- exp(mu[i])
+  }
+
+beta.waterph~dnorm(0,0.001)
+
+    for(i in 1:n.groups){
+    alpha[i] ~ dnorm(0, 0.001) 
+    beta.spp[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n.stages){
+    beta.stage[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n){
+    residual[i] <- hg[i]-mu[i]
+    predicted[i] <- mu[i]
+    sq[i] <- pow(residual[i],2)
+    y.new[i] ~ dnorm(mu[i], tau)
+    sq.new[i] <- pow(y.new[i] - predicted[i],2)
+  }
+  fit<- sum(sq[])
+  fit.new <- sum(sq.new[])
+  test <- step(fit.new - fit)
+  bpvalue <- mean(test)
+  sigma ~ dunif(0,100)
+  tau <- 1/(sigma*sigma)
+}
+
+jagsfitlogm4 <- jags(data = c("spp","hg","waterhg","waterph","n","n.groups","stage", "n.stages"), inits = jags.inits, jags.params,
+                     n.iter = 20000, model.file = logmercury_pH)
+print(jagsfitlogm4,digits = 5)
+traceplot(jagsfitlogm4)
+
+#pH does not add anything to the model and is non-significant:
+hist(jagsfitlogm4$BUGSoutput$sims.list$beta.waterph,
+     xlab = "Posterior distribution of regression coefficient for pH",
+     main = NULL)
+abline(v = quantile(jagsfitlogm4$BUGSoutput$sims.list$beta.waterph,probs = c(0.025,0.975)), col = "red")
+
+#DIC of the model with pH is higher (and therefore less well-supported):
+cat(paste(c("DIC for Spp*WaterHg + Stage"), jagsfitlogm2$BUGSoutput$DIC))
+cat(paste(c("DIC for Spp*WaterHg + Stage + pH:"),jagsfitlogm4$BUGSoutput$DIC))
+#rm(hg, n, n.groups, n.stages, jags.params, spp, stage, waterhg, jags.inits)
+
+##Try adding Aluminum:
+
+spp <- data_subset2$Spp
+hg <- log(data_subset2$Amphib_MeHg)
+stage <- data_subset2$Life_Stage
+stage <- droplevels(stage)
+waterhg <- log(data_subset2$Water_MeHg)
+wateral <- data_subset2$Water_Al
+n <- nrow(data_subset2)
+n.groups <- length(levels(data_subset2$Spp))
+n.stages <- 3
+jags.params <- c("alpha","beta.spp", "beta.stage", "beta.wateral","wateral","waterph", "sigma", "mu","esthg",
+                 "fit","fit.new","bpvalue","residual","predicted") #added mu to monitor predictions!
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+
+logmercury_AL <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]] + beta.wateral*wateral[i]
+    esthg[i] <- exp(mu[i])
+  }
+  
+  beta.wateral~dnorm(0,0.001)
+  
+  for(i in 1:n.groups){
+    alpha[i] ~ dnorm(0, 0.001) 
+    beta.spp[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n.stages){
+    beta.stage[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n){
+    residual[i] <- hg[i]-mu[i]
+    predicted[i] <- mu[i]
+    sq[i] <- pow(residual[i],2)
+    y.new[i] ~ dnorm(mu[i], tau)
+    sq.new[i] <- pow(y.new[i] - predicted[i],2)
+  }
+  fit<- sum(sq[])
+  fit.new <- sum(sq.new[])
+  test <- step(fit.new - fit)
+  bpvalue <- mean(test)
+  sigma ~ dunif(0,100)
+  tau <- 1/(sigma*sigma)
+}
+
+jagsfitlogm5 <- jags(data = c("spp","hg","waterhg","wateral","n","n.groups","stage", "n.stages"), inits = jags.inits, jags.params,
+                     n.iter = 20000, model.file = logmercury_AL)
+print(jagsfitlogm5,digits = 5)
+traceplot(jagsfitlogm5)
+
+
+#Aluminum does not add anything to the model and is non-significant:
+hist(jagsfitlogm5$BUGSoutput$sims.list$beta.wateral,
+     xlab = "Posterior distribution of regression coefficient for Aluminum",
+     main = NULL)
+abline(v = quantile(jagsfitlogm5$BUGSoutput$sims.list$beta.wateral,probs = c(0.025,0.975)), col = "red")
+
+#DIC of the model with Al is higher (and therefore less well-supported):
+cat(paste(c("DIC for Spp*WaterHg + Stage"), jagsfitlogm2$BUGSoutput$DIC))
+cat(paste(c("DIC for Spp*WaterHg + Stage + Al:"),jagsfitlogm5$BUGSoutput$DIC))
+#rm(hg, n, n.groups, n.stages, jags.params, spp, stage, waterhg, jags.inits)
+
+##Try adding DOC:
+
+spp <- data_subset2$Spp
+hg <- log(data_subset2$Amphib_MeHg)
+stage <- data_subset2$Life_Stage
+stage <- droplevels(stage)
+waterhg <- log(data_subset2$Water_MeHg)
+waterDOC <- data_subset2$Water_DOC
+n <- nrow(data_subset2)
+n.groups <- length(levels(data_subset2$Spp))
+n.stages <- 3
+jags.params <- c("alpha","beta.spp", "beta.stage", "beta.waterDOC","waterDOC", "sigma", "mu","esthg",
+                 "fit","fit.new","bpvalue","residual","predicted") #added mu to monitor predictions!
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+
+logmercury_DOC <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]] + beta.waterDOC*waterDOC[i]
+    esthg[i] <- exp(mu[i])
+  }
+  
+  beta.waterDOC~dnorm(0,0.001)
+  
+  for(i in 1:n.groups){
+    alpha[i] ~ dnorm(0, 0.001) 
+    beta.spp[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n.stages){
+    beta.stage[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n){
+    residual[i] <- hg[i]-mu[i]
+    predicted[i] <- mu[i]
+    sq[i] <- pow(residual[i],2)
+    y.new[i] ~ dnorm(mu[i], tau)
+    sq.new[i] <- pow(y.new[i] - predicted[i],2)
+  }
+  fit<- sum(sq[])
+  fit.new <- sum(sq.new[])
+  test <- step(fit.new - fit)
+  bpvalue <- mean(test)
+  sigma ~ dunif(0,100)
+  tau <- 1/(sigma*sigma)
+}
+
+jagsfitlogm6 <- jags(data = c("spp","hg","waterhg","waterDOC","n","n.groups","stage", "n.stages"), inits = jags.inits, jags.params,
+                     n.iter = 20000, model.file = logmercury_DOC)
+print(jagsfitlogm6,digits = 5)
+traceplot(jagsfitlogm6)
+
+#DOC does not add anything to the model and is non-significant:
+hist(jagsfitlogm6$BUGSoutput$sims.list$beta.waterDOC,
+     xlab = "Posterior distribution of regression coefficient for DOC",
+     main = NULL)
+abline(v = quantile(jagsfitlogm6$BUGSoutput$sims.list$beta.waterDOC,probs = c(0.025,0.975)), col = "red")
+
+#DIC of the model with DOC is higher (and therefore less well-supported):
+cat(paste(c("DIC for Spp*WaterHg + Stage"), jagsfitlogm2$BUGSoutput$DIC))
+cat(paste(c("DIC for Spp*WaterHg + Stage + DOC:"),jagsfitlogm6$BUGSoutput$DIC))
+#rm(hg, n, n.groups, n.stages, jags.params, spp, stage, waterhg, jags.inits)
+
+##Try adding S:
+
+spp <- data_subset2$Spp
+hg <- log(data_subset2$Amphib_MeHg)
+stage <- data_subset2$Life_Stage
+stage <- droplevels(stage)
+waterhg <- log(data_subset2$Water_MeHg)
+waterS <- data_subset2$Water_S
+n <- nrow(data_subset2)
+n.groups <- length(levels(data_subset2$Spp))
+n.stages <- 3
+jags.params <- c("alpha","beta.spp", "beta.stage", "beta.waterS","waterS", "sigma", "mu","esthg",
+                 "fit","fit.new","bpvalue","residual","predicted") #added mu to monitor predictions!
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+
+logmercury_S <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]] + beta.waterS*waterS[i]
+    esthg[i] <- exp(mu[i])
+  }
+  
+  beta.waterS~dnorm(0,0.001)
+  
+  for(i in 1:n.groups){
+    alpha[i] ~ dnorm(0, 0.001) 
+    beta.spp[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n.stages){
+    beta.stage[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n){
+    residual[i] <- hg[i]-mu[i]
+    predicted[i] <- mu[i]
+    sq[i] <- pow(residual[i],2)
+    y.new[i] ~ dnorm(mu[i], tau)
+    sq.new[i] <- pow(y.new[i] - predicted[i],2)
+  }
+  fit<- sum(sq[])
+  fit.new <- sum(sq.new[])
+  test <- step(fit.new - fit)
+  bpvalue <- mean(test)
+  sigma ~ dunif(0,100)
+  tau <- 1/(sigma*sigma)
+}
+
+jagsfitlogm7 <- jags(data = c("spp","hg","waterhg","waterS","n","n.groups","stage", "n.stages"), inits = jags.inits, jags.params,
+                     n.iter = 20000, model.file = logmercury_S)
+print(jagsfitlogm7,digits = 5)
+traceplot(jagsfitlogm7)
+
+#DOC does not add anything to the model and is non-significant:
+hist(jagsfitlogm7$BUGSoutput$sims.list$beta.waterS,
+     xlab = "Posterior distribution of regression coefficient for S",
+     main = NULL)
+abline(v = quantile(jagsfitlogm7$BUGSoutput$sims.list$beta.waterS,probs = c(0.025,0.975)), col = "red")
+
+#DIC of the model with S is modestly lower (and therefore slightly more well-supported):
+cat(paste(c("DIC for Spp*WaterHg + Stage"), jagsfitlogm2$BUGSoutput$DIC))
+cat(paste(c("DIC for Spp*WaterHg + Stage + S:"),jagsfitlogm7$BUGSoutput$DIC))
+#rm(hg, n, n.groups, n.stages, jags.params, spp, stage, waterhg, jags.inits)
+
+##Do these new variables show any relationship to water mercury?
+waterhg <- log(data_subset2$WaterMeHg)
+waterDOC <- as.vector(scale(data_subset2$Water_DOC))
+waterS <- data_subset2$Water_S
+waterAl <- data_subset2$Water_Al
+waterpH <- data_subset2$Water_pH
+n <- nrow(data_subset2)
+jags.params <- c("alpha","beta.waterDOC","beta.waterS","beta.waterAl","beta.waterpH","sigma","mu","pred")
+
+jags.inits <- function(){
+  list(sigma = rlnorm(1))
+}
+
+model_waterhg <- function () {
+  for(i in 1:n){
+    waterhg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha + beta.waterDOC*waterDOC[i] + beta.waterS*waterS[i] + beta.waterAl*waterAl[i] + beta.waterpH*waterpH[i]
+    pred[i] <- exp(mu[i])
+  }
+  alpha ~ dnorm(0,0.001)
+  beta.waterDOC ~ dnorm(0,0.001)
+  beta.waterS ~ dnorm(0,0.001)
+  beta.waterAl ~ dnorm(0,0.001)
+  beta.waterpH ~ dnorm(0,0.001)
+  tau <- 1/(sigma*sigma)
+  sigma ~ dunif(0,100)
+}
+
+jagsfitm8 <- jags(data = c("waterhg","waterDOC","waterS","waterAl","waterpH","n"),inits = jags.inits, 
+                  jags.params,n.iter = 50000,model.file = model_waterhg)
+print(jagsfitm8,digits = 5)
+traceplot(jagsfitm8)
+
+##Aluminum and pH appear to have positive effects on methlymercury in the water.
+
+##What about total water mercury?
+
+waterhg <- log(data_subset2$Water_THg)
+waterDOC <- as.vector(scale(data_subset2$Water_DOC))
+waterS <- data_subset2$Water_S
+waterAl <- data_subset2$Water_Al
+waterpH <- data_subset2$Water_pH
+n <- nrow(data_subset2)
+jags.params <- c("alpha","beta.waterDOC","beta.waterS","beta.waterAl","beta.waterpH","sigma")
+
+jags.inits <- function(){
+  list(sigma = rlnorm(1))
+}
+
+model_waterThg <- function () {
+  for(i in 1:n){
+    waterhg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha + beta.waterDOC*waterDOC[i] + beta.waterS*waterS[i] + beta.waterAl*waterAl[i] + beta.waterpH*waterpH[i]
+  }
+  alpha ~ dnorm(0,0.001)
+  beta.waterDOC ~ dnorm(0,0.001)
+  beta.waterS ~ dnorm(0,0.001)
+  beta.waterAl ~ dnorm(0,0.001)
+  beta.waterpH ~ dnorm(0,0.001)
+  tau <- 1/(sigma*sigma)
+  sigma ~ dunif(0,100)
+}
+
+jagsfitm9 <- jags(data = c("waterhg","waterDOC","waterS","waterAl","waterpH","n"),inits = jags.inits, 
+                  jags.params,n.iter = 50000,model.file = model_waterThg)
+print(jagsfitm9,digits = 5)
+traceplot(jagsfitm9)
+
+#Generating predictions.
+waterhg <- log(data_subset2$Water_MeHg)
+waterAl <- data_subset2$Water_Al
+waterpH <- data_subset2$Water_pH
+alSeq <- seq(min(waterAl), max(waterAl),length.out = 111)
+pHSeq <- seq(min(waterpH), max(waterpH),length.out = 111)
+n <- nrow(data_subset2)
+jags.params <- c("alpha","beta.waterAl","beta.waterpH","sigma","pred.phtrans", "pred.altrans")
+
+jags.inits <- function(){
+  list(sigma = rlnorm(1))
+}
+
+model_waterhg.p <- function () {
+  for(i in 1:n){
+    waterhg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha + beta.waterAl*waterAl[i] + beta.waterpH*waterpH[i]
+    pred.ph[i] <- alpha + beta.waterAl*mean(alSeq) + beta.waterpH*pHSeq[i]
+    pred.phtrans[i] <- exp(pred.ph[i])
+    pred.al[i] <- alpha + beta.waterAl*alSeq[i] + beta.waterpH*mean(pHSeq)
+    pred.altrans[i] <- exp(pred.al[i])
+  }
+  alpha ~ dnorm(0,0.001)
+  beta.waterAl ~ dnorm(0,0.001)
+  beta.waterpH ~ dnorm(0,0.001)
+  tau <- 1/(sigma*sigma)
+  sigma ~ dunif(0,100)
+}
+
+jagsfitm8.pred <- jags(data = c("waterhg","waterAl","waterpH","alSeq","pHSeq","n"),inits = jags.inits, 
+                  jags.params,n.iter = 50000, model.file = model_waterhg.p)
+print(jagsfitm8.pred,digits = 5)
+
+#install.packages("matrixStats")
+#library(matrixStats)
+plot(pHSeq,jagsfitm8.pred$BUGSoutput$median$pred.phtrans, type = "l",
+     xlab = "Water pH", ylab = "Water Methylmercury (ng/ml)",
+     ylim = c(min(data_subset2$Water_MeHg),max(data_subset2$Water_MeHg)))
+points(data_subset2$Water_pH,data_subset2$Water_MeHg, add = T)
+lines(pHSeq,colQuantiles(jagsfitm8.pred$BUGSoutput$sims.list$pred.phtrans, probs = 0.975),
+      lty = 2)
+lines(pHSeq,colQuantiles(jagsfitm8.pred$BUGSoutput$sims.list$pred.phtrans, probs = 0.025),
+      lty = 2)
+
+plot(alSeq,jagsfitm8.pred$BUGSoutput$median$pred.altrans, type = "l",
+     xlab = "Water Aluminum (ng/ml)", ylab = "Water Methylmercury (ng/ml)",
+     ylim = c(min(data_subset2$Water_MeHg),max(data_subset2$Water_MeHg)))
+points(data_subset2$Water_Al,data_subset2$Water_MeHg)
+lines(alSeq,colQuantiles(jagsfitm8.pred$BUGSoutput$sims.list$pred.altrans, probs = 0.975),
+      lty = 2)
+lines(alSeq,colQuantiles(jagsfitm8.pred$BUGSoutput$sims.list$pred.altrans, probs = 0.025),
+      lty = 2)
+
+
 
