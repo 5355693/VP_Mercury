@@ -177,7 +177,7 @@ library(tidyr)
 #In addition, mercury levels measured in blood and tissue taken from the same individual show little
 #correspondence and are not interchangeable:
 data.df[data.df$Life_Stage == "Adult",] %>%
-gather(., key = Meas_type,value = Mercury, 9:10) %>%
+gather(., key = Meas_type,value = Mercury, 14:15) %>%
   ggplot(., aes(x = Meas_type, y = Mercury, group = individual, color = Spp)) + geom_point() + geom_path() + 
   xlab("Measurement type") + ylab("Mercury level")
 

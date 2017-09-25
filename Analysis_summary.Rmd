@@ -57,7 +57,7 @@ p1a + geom_line(aes(x = Sample_Date2, y = Water_THg, color = Pool)) +
   xlab("Sample date") + theme(axis.text.x = element_text(angle = 340, vjust = 0.5))
 ```
 
-Performing a t-test assuming unequal variances, we find that the 95% credible interval for the difference in methylmercury (the parameter named "delta") between the two habitats includes zero (-0.00013, 0.00131).
+Performing a t-test assuming unequal variances, we find that the 95% credible interval for the difference in methylmercury (the parameter named "delta") between the two habitats includes zero (-0.00015, 0.00132).
 ```{r, echo = FALSE}
 library(R2jags)
 library(mcmcplots)
@@ -106,7 +106,7 @@ abline(v = quantile(jagsfit$BUGSoutput$sims.list$delta,probs = c(0.025,0.975)), 
 
 We can conclude that coniferous pools tend to have higher levels of methylmercury, but that the difference is not significant.
 
-Repeating the analysis using total mercury levels in water produces a similar result: the difference in total mercury between coniferous and deciduous pools is approximately zero (mean difference = 0.00026, 95% credible interval = -0.00057 - 0.00108).
+Repeating the analysis using total mercury levels in water produces a similar result: the difference in total mercury between coniferous and deciduous pools is approximately zero (mean difference = 0.00026, 95% credible interval = -0.00053 - 0.00108).
 ```{r, echo = FALSE}
 data_subsetThg <- subset(data.df, !duplicated(Water_THg))
 data_subsetThg <- subset(data_subsetThg, (!is.na(data_subsetThg$Water_THg)))
@@ -165,7 +165,7 @@ individual are connected by a line. Notice that tissue tends to be produce highe
 library(tidyr)
 library(dplyr)
 data.df[data.df$Life_Stage == "Adult",] %>%
-gather(., key = Meas_type,value = Mercury, 9:10) %>%
+gather(., key = Meas_type,value = Mercury, 14:15) %>%
   ggplot(., aes(x = Meas_type, y = Mercury, group = individual, color = Spp)) + geom_point() + geom_path() + 
   xlab("Measurement type") + ylab("Mercury level")
 ```
