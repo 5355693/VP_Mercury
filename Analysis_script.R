@@ -250,7 +250,7 @@ hg <- log(data_subset2$Amphib_MeHg)
 waterhg <- log(data_subset2$Water_MeHg) 
 n <- nrow(data_subset2)
 n.groups <- length(levels(data_subset2$Spp))
-jags.params <- c("alpha","beta", "sigma")
+jags.params <- c("alpha","beta.waterhg", "sigma")
 jags.inits <- function(){
   list(sigma=rlnorm(1))
 }
@@ -258,23 +258,26 @@ jags.inits <- function(){
 mercuryanova <- function () {
   for(i in 1:n){
     hg[i] ~ dnorm(mu[i], tau)
-    mu[i] <- alpha[spp[i]] + beta[spp[i]]*waterhg[i]
+    #mu[i] <- alpha[spp[i]] + beta[spp[i]]*waterhg[i]
+    mu[i] <- alpha[spp[i]] + beta.waterhg*waterhg[i]
   }
   for(i in 1:n.groups){
-  alpha[i] ~ dnorm(0, 1e-11) #choice of a prior is key - if the SD of the distribution >1e-10, results bad. Assume this is
-  beta [i] ~ dnorm(0, 1e-11)
+  #alpha[i] ~ dnorm(0, 1e-11) #choice of a prior is key - if the SD of the distribution >1e-10, results bad. Assume this is
+  #beta [i] ~ dnorm(0, 1e-11)
+    alpha[i] ~ dnorm(0, 0.001)
   }
   sigma ~ dunif(0,100)
   tau <- 1/(sigma*sigma)
+  beta.waterhg ~ dnorm(0,0.001)
 }
 
 jagsfitm1 <- jags(data = c("spp","hg","waterhg","n","n.groups"), inits = jags.inits, jags.params,
                 n.iter = 50000, model.file = mercuryanova)
 print(jagsfitm1,digits = 5)
-#traceplot(jagsfit)
+traceplot(jagsfit)
 
 ##Compare with ML model. Close match, as long as careful with priors.
-(mercurytest_ML <- lm(Amphib_MeHg ~ Spp*Water_MeHg, data = data_subset2))
+(mercurytest_ML <- lm(Amphib_MeHg ~ Spp + Water_MeHg, data = data_subset2))
 summary(mercurytest_ML)
 
 rm(spp,hg,waterhg,n,n.groups,jags.params,jags.inits, jagsfit)
@@ -294,7 +297,7 @@ waterhg <- data_subset2$Water_MeHg #could consider scaling this to get smaller B
 n <- nrow(data_subset2)
 n.groups <- length(levels(data_subset2$Spp))
 n.stages <- 3
-jags.params <- c("alpha","beta.spp", "beta.stage", "sigma", "mu") #added mu to monitor predictions!
+jags.params <- c("alpha","beta.waterhg", "beta.stage", "sigma", "mu") #added mu to monitor predictions!
 jags.inits <- function(){
   list(sigma=rlnorm(1))
 }
@@ -302,28 +305,31 @@ jags.inits <- function(){
 mercuryanova2 <- function () {
   for(i in 1:n){
     hg[i] ~ dnorm(mu[i], tau)
-    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]]
+    #mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]]
+    mu[i] <- alpha[spp[i]] + beta.waterhg*waterhg[i] + beta.stage[stage[i]]
   }
   for(i in 1:n.groups){
-    alpha[i] ~ dnorm(0, 1e-11) #choice of a prior is key - if the SD of the distribution >1e-10, results bad. Assume this is
-    beta.spp[i] ~ dnorm(0, 1e-11)
+    alpha[i] ~ dnorm(0, 0.001) #choice of a prior is key - if the SD of the distribution >1e-10, results bad. Assume this is
+    #beta.spp[i] ~ dnorm(0, 1e-11)
   }
   for(i in 1:n.stages){
     beta.stage[i] ~ dnorm(0,0.001)
   }
   sigma ~ dunif(0,100)
   tau <- 1/(sigma*sigma)
+  beta.waterhg ~ dnorm (0, 0.001)
 }
 
 jagsfitm2 <- jags(data = c("spp","hg","waterhg","n","n.groups","stage", "n.stages"), inits = jags.inits, jags.params,
-                n.iter = 20000, model.file = mercuryanova2)
+                n.iter = 50000, model.file = mercuryanova2)
 print(jagsfitm2,digits = 5)
 traceplot(jagsfitm2)
 
 
 
 ##Compare ML model
-mercuryanova2_ML <- lm(Amphib_MeHg ~ Spp*Water_MeHg-1-Spp-Water_MeHg + Life_Stage, data = data_subset2)
+#mercuryanova2_ML <- lm(Amphib_MeHg ~ Spp*Water_MeHg-1-Spp-Water_MeHg + Life_Stage, data = data_subset2)
+mercuryanova2_ML <- lm(Amphib_MeHg ~ Spp + Water_MeHg + Life_Stage, data = data_subset2)
 summary(mercuryanova2_ML)
 
 ##Problems with prediction...getting negative values of mercury. Looking more closely at predictions, 
@@ -338,7 +344,7 @@ rm(spp, hg, stage, waterhg, n, n.groups, n.stages, jags.params, jags.inits)
 rm(mercurytest2_ML)
 
 ###Try using the log of Hg levels:
-(logmercuryanova2_ML <- lm(log(Amphib_MeHg) ~ Spp*log(Water_MeHg)+Life_Stage, data = data_subset2))
+(logmercuryanova2_ML <- lm(log(Amphib_MeHg) ~ Spp + log(Water_MeHg)+Life_Stage, data = data_subset2))
 plot(predict(logmercuryanova2_ML, newdata = data_subset2, type = "response"),log(data_subset2$Amphib_MeHg))
 summary(logmercuryanova2_ML)
 #Compare adjusted r2 - this model fits much better.
@@ -354,7 +360,7 @@ waterhg <- log(data_subset2$Water_MeHg) #could consider scaling this to get smal
 n <- nrow(data_subset2)
 n.groups <- length(levels(data_subset2$Spp))
 n.stages <- 3
-jags.params <- c("alpha","beta.spp", "beta.stage", "sigma", "mu") #added mu to monitor predictions!
+jags.params <- c("alpha","beta.waterhg", "beta.stage", "sigma", "mu") #added mu to monitor predictions!
 jags.inits <- function(){
   list(sigma=rlnorm(1))
 }
@@ -362,21 +368,23 @@ jags.inits <- function(){
 logmercuryanova2 <- function () {
   for(i in 1:n){
     hg[i] ~ dnorm(mu[i], tau)
-    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]]
+    #mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]]
+    mu[i] <- alpha[spp[i]] + beta.waterhg*waterhg[i] + beta.stage[stage[i]]
   }
   for(i in 1:n.groups){
     alpha[i] ~ dnorm(0, 0.001) 
-    beta.spp[i] ~ dnorm(0, 0.001)
+    #beta.spp[i] ~ dnorm(0, 0.001)
   }
   for(i in 1:n.stages){
     beta.stage[i] ~ dnorm(0,0.001)
   }
   sigma ~ dunif(0,100)
   tau <- 1/(sigma*sigma)
+  beta.waterhg ~ dnorm (0,0.001)
 }
 
 jagsfitlogm2 <- jags(data = c("spp","hg","waterhg","n","n.groups","stage", "n.stages"), inits = jags.inits, jags.params,
-                n.iter = 20000, model.file = logmercuryanova2)
+                n.iter = 50000, model.file = logmercuryanova2)
 print(jagsfitlogm2,digits = 5)
 traceplot(jagsfitlogm2)
 plot(jagsfit$BUGSoutput$median$mu,log(data_subset2$Amphib_MeHg))
@@ -384,7 +392,7 @@ abline(0,1)
 
 ##It is hard to compare the coefficients (and I can't figure out how to code them to be equivalent), 
 #but this model is the same as the LM:
-plot(jagsfit$BUGSoutput$median$mu,predict(logmercuryanova2_ML, newdata = data_subset2, type = "response"))
+plot(jagsfitlogm2$BUGSoutput$median$mu,predict(logmercuryanova2_ML, newdata = data_subset2, type = "response"))
 abline(0,1)
 
 ##Re-run with a variable to monitor predicted values and to generate stats for GOF
@@ -396,7 +404,7 @@ waterhg <- log(data_subset2$Water_MeHg)
 n <- nrow(data_subset2)
 n.groups <- length(levels(data_subset2$Spp))
 n.stages <- 3
-jags.params <- c("alpha","beta.spp", "beta.stage", "waterhg","sigma", "mu","esthg",
+jags.params <- c("alpha","beta.spp", "beta.waterhg", "waterhg","sigma", "mu","esthg",
                  "fit","fit.new","bpvalue","residual","predicted") #added mu to monitor predictions!
 jags.inits <- function(){
   list(sigma=rlnorm(1))
@@ -405,12 +413,12 @@ jags.inits <- function(){
 logmercuryanova2 <- function () {
   for(i in 1:n){
     hg[i] ~ dnorm(mu[i], tau)
-    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]]
+    mu[i] <- alpha[spp[i]] + beta.waterhg*waterhg[i] + beta.stage[stage[i]]
     esthg[i] <- exp(mu[i])
   }
   for(i in 1:n.groups){
     alpha[i] ~ dnorm(0, 0.001) 
-    beta.spp[i] ~ dnorm(0, 0.001)
+    #beta.spp[i] ~ dnorm(0, 0.001)
   }
   for(i in 1:n.stages){
     beta.stage[i] ~ dnorm(0, 0.001)
@@ -428,12 +436,16 @@ logmercuryanova2 <- function () {
   bpvalue <- mean(test)
   sigma ~ dunif(0,100)
   tau <- 1/(sigma*sigma)
+  beta.waterhg ~ dnorm (0,0.001)
 }
 
 jagsfitlogm2 <- jags(data = c("spp","hg","waterhg","n","n.groups","stage", "n.stages"), inits = jags.inits, jags.params,
-                n.iter = 20000, model.file = logmercuryanova2)
+                n.iter = 50000, model.file = logmercuryanova2)
 print(jagsfitlogm2,digits = 5)
 traceplot(jagsfitlogm2)
+
+##Bayesian P-value suggests a good fit (0.53233):
+jagsfitlogm2$BUGSoutput$mean$bpvalue
 
 rm(hg, n, n.groups, n.stages, jags.params, spp, stage, waterhg, jags.inits)
 
@@ -449,7 +461,7 @@ n <- nrow(data_subset2)
 n.groups <- length(levels(data_subset2$Spp))
 n.habitat <- 2
 n.stages <- 3
-jags.params <- c("alpha","beta.waterhg","beta.spp", "beta.stage", "beta.habitat","sigma", "mu","esthg",
+jags.params <- c("alpha","beta.waterhg", "beta.stage", "beta.habitat","sigma", "mu","esthg",
                  "fit","fit.new","bpvalue","residual","predicted") #added mu to monitor predictions!
 jags.inits <- function(){
   list(sigma=rlnorm(1))
@@ -458,12 +470,12 @@ jags.inits <- function(){
 logmercuryanova3 <- function () {
   for(i in 1:n){
     hg[i] ~ dnorm(mu[i], tau)
-    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.waterhg*waterhg[i] + beta.stage[stage[i]] + beta.habitat[habitat[i]]
+    mu[i] <- alpha[spp[i]] + beta.waterhg*waterhg[i] + beta.stage[stage[i]] + beta.habitat[habitat[i]]
     esthg[i] <- exp(mu[i])
   }
   for(i in 1:n.groups){
     alpha[i] ~ dnorm(0, 0.001) 
-    beta.spp[i] ~ dnorm(0, 0.001)
+    #beta.spp[i] ~ dnorm(0, 0.001)
   }
   for(i in 1:n.stages){
     beta.stage[i] ~ dnorm(0, 0.001)
@@ -488,7 +500,7 @@ logmercuryanova3 <- function () {
 }
 
 jagsfitlogm3 <- jags(data = c("spp","hg","waterhg","habitat","n","n.groups","n.habitat","stage", "n.stages"), inits = jags.inits, jags.params,
-                n.iter = 20000, model.file = logmercuryanova3)
+                n.iter = 50000, model.file = logmercuryanova3)
 
 print(jagsfitlogm3,digits = 5) 
 print(jagsfitlogm2, digits = 5)
@@ -501,7 +513,7 @@ traceplot(jagsfitlogm3)
 plot(jagsfitlogm3$BUGSoutput$median$esthg,data_subset2$Amphib_MeHg)
 abline(0,1)
 
-##Bayesian P-value suggests a slightly worse fit (0.53):
+##Bayesian P-value suggests a slightly better fit (0.511):
 jagsfitlogm3$BUGSoutput$mean$bpvalue
 
 #Can visualize this graphically: not systematically under- or over-estimating error.
@@ -511,8 +523,8 @@ plot(jagsfitlogm3$BUGSoutput$sims.list$fit,jagsfitlogm3$BUGSoutput$sims.list$fit
 abline(0,1)
 
 #The ML solution also fits slightly worse than the model w/out habitat (R2 = 0.8552 v.8549)
-summary(lm(log(Amphib_MeHg) ~ Spp*log(Water_MeHg) + Life_Stage + Habitat, data = data_subset2))
-logmercuryanova3_ML <- lm(log(Amphib_MeHg) ~ Spp*log(Water_MeHg) + Life_Stage + Habitat, data = data_subset2)
+summary(lm(log(Amphib_MeHg) ~ Spp + log(Water_MeHg) + Life_Stage + Habitat, data = data_subset2))
+logmercuryanova3_ML <- lm(log(Amphib_MeHg) ~ Spp + log(Water_MeHg) + Life_Stage + Habitat, data = data_subset2)
 
 #Confirming that the JAGS and ML models are the same:
 plot(jagsfitlogm3$BUGSoutput$median$mu,predict(logmercuryanova3_ML, newdata = data_subset2, type = "response"),
@@ -521,9 +533,9 @@ plot(jagsfitlogm3$BUGSoutput$median$mu,predict(logmercuryanova3_ML, newdata = da
 abline(0,1)
 
 #Best model so far is Spp*WaterHg + Stage:
-cat(paste(c("DIC for Spp*WaterHg:"), jagsfitm1$BUGSoutput$DIC))
-cat(paste(c("DIC for Spp*WaterHg + Stage"), jagsfitlogm2$BUGSoutput$DIC))
-cat(paste(c("DIC for Spp*WaterHg + Stage + Habitat:"),jagsfitlogm3$BUGSoutput$DIC))
+cat(paste(c("DIC for Spp + WaterHg:"), jagsfitm1$BUGSoutput$DIC))
+cat(paste(c("DIC for Spp + WaterHg + Stage:"), jagsfitlogm2$BUGSoutput$DIC))
+cat(paste(c("DIC for Spp + WaterHg + Stage + Habitat:"),jagsfitlogm3$BUGSoutput$DIC))
 
 #It would make sense to consider adding a random effect for pool, but the ML
 #results suggest doing so adds nothing in terms of inference. Pool as a fixed
@@ -546,28 +558,35 @@ waterhgseq <- seq(min(waterhg), max(waterhg),length.out = 111)
 n <- nrow(data_subset2)
 n.groups <- length(levels(data_subset2$Spp))
 n.stages <- 3
-jags.params <- c("alpha","beta.spp", "beta.stage", "waterhg","waterhgseq","sigma", "mu","predWOFRegg",
+jags.params <- c("alpha", "beta.stage", "waterhg","waterhgseq","sigma", "mu","predWOFRegg",
                  "predWOFRearly","predWOFRlate","predSPSAegg","predSPSAearly","predSPSAlate","fit",
                  "fit.new","bpvalue","residual","predicted") #added mu to monitor predictions!
 jags.inits <- function(){
   list(sigma=rlnorm(1))
 }
-#Model Amphib_MeHg ~ Spp*Water_MeHg + Life_Stage
+#Model Amphib_MeHg ~ Spp + Water_MeHg + Life_Stage
 predmodel <- function () {
   for(i in 1:n){
     hg[i] ~ dnorm(mu[i], tau)
-    mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]]
+    #mu[i] <- alpha[spp[i]] + beta.spp[spp[i]]*waterhg[i] + beta.stage[stage[i]]
     #esthg[i] <- exp(mu[i])
-    predWOFRegg[i] <- alpha[spp[5]] + beta.spp[spp[5]]*waterhgseq[i] + beta.stage[stage[1]]
-    predWOFRearly[i] <- alpha[spp[5]] + beta.spp[spp[5]]*waterhgseq[i] + beta.stage[stage[5]]
-    predWOFRlate[i] <- alpha[spp[5]] + beta.spp[spp[5]]*waterhgseq[i] + beta.stage[stage[13]]
-    predSPSAegg[i] <- alpha[spp[1]] + beta.spp[spp[1]]*waterhgseq[i] + beta.stage[stage[1]]
-    predSPSAearly[i] <- alpha[spp[1]] + beta.spp[spp[1]]*waterhgseq[i] + beta.stage[stage[5]]
-    predSPSAlate[i] <- alpha[spp[1]] + beta.spp[spp[1]]*waterhgseq[i] + beta.stage[stage[13]]
+    mu[i] <- alpha[spp[i]] + beta.waterhg*waterhg[i] + beta.stage[stage[i]]
+    #predWOFRegg[i] <- alpha[spp[5]] + beta.spp[spp[5]]*waterhgseq[i] + beta.stage[stage[1]]
+    predWOFRegg[i] <- alpha[spp[5]] + beta.waterhg*waterhgseq[i] + beta.stage[stage[1]]
+    #predWOFRearly[i] <- alpha[spp[5]] + beta.spp[spp[5]]*waterhgseq[i] + beta.stage[stage[5]]
+    predWOFRearly[i] <-alpha[spp[5]] + beta.waterhg*waterhgseq[i] + beta.stage[stage[5]]
+    #predWOFRlate[i] <- alpha[spp[5]] + beta.spp[spp[5]]*waterhgseq[i] + beta.stage[stage[13]]
+    predWOFRlate[i] <- alpha[spp[5]] + beta.waterhg*waterhgseq[i] + beta.stage[stage[13]]
+    #predSPSAegg[i] <- alpha[spp[1]] + beta.spp[spp[1]]*waterhgseq[i] + beta.stage[stage[1]]
+    predSPSAegg[i] <- alpha[spp[1]] + beta.waterhg*waterhgseq[i] + beta.stage[stage[1]]
+    #predSPSAearly[i] <- alpha[spp[1]] + beta.spp[spp[1]]*waterhgseq[i] + beta.stage[stage[5]]
+    predSPSAearly[i] <- alpha[spp[1]] + beta.waterhg*waterhgseq[i] + beta.stage[stage[5]]
+    #predSPSAlate[i] <- alpha[spp[1]] + beta.spp[spp[1]]*waterhgseq[i] + beta.stage[stage[13]]
+    predSPSAlate[i] <- alpha[spp[1]] + beta.waterhg*waterhgseq[i] + beta.stage[stage[13]]
   }
   for(i in 1:n.groups){
     alpha[i] ~ dnorm(0, 0.001) 
-    beta.spp[i] ~ dnorm(0, 0.001)
+    #beta.spp[i] ~ dnorm(0, 0.001)
   }
   for(i in 1:n.stages){
     beta.stage[i] ~ dnorm(0, 0.001)
@@ -585,10 +604,11 @@ predmodel <- function () {
   bpvalue <- mean(test)
   sigma ~ dunif(0,100)
   tau <- 1/(sigma*sigma)
+  beta.waterhg ~ dnorm(0,0.001)
 }
 
 jagsfitpredmodel <- jags(data = c("spp","hg","waterhg","n","n.groups","stage", "n.stages","waterhgseq"), inits = jags.inits, jags.params,
-                     n.iter = 20000, model.file = predmodel)
+                     n.iter = 50000, model.file = predmodel)
 print(jagsfitpredmodel,digits = 5)
 
 pred.matrix <- matrix(nrow = 111,ncol=19,dimnames = list(c(),c("WOFRegg","WOFRegglowci","WOFRegghighci",
@@ -1207,4 +1227,54 @@ lines(alSeq,colQuantiles(jagsfitm8.pred$BUGSoutput$sims.list$pred.altrans, probs
       lty = 2)
 
 
+##After plotting the model predictions for species*waterMeHg + LifeStage, I'm wondering
+##if it isn't actually correct to include the parameter for waterMeHg. Because it doesn't look
+##like waterMeHg is actually important...
+spp <- data_subset2$Spp
+hg <- log(data_subset2$Amphib_MeHg)
+#stage <- data_subset2$Life_Stage
+#stage <- droplevels(stage)
+waterhg <- log(data_subset2$Water_MeHg) #could consider scaling this to get smaller Betas
+#habitat <- data_subset2$Habitat
+n <- nrow(data_subset2)
+n.groups <- length(levels(data_subset2$Spp))
+#n.habitat <- 2
+#n.stages <- 3
+jags.params <- c("alpha","beta.waterhg","sigma", "mu","esthg",
+                 "fit","fit.new","bpvalue","residual","predicted", "beta.spp") #added mu to monitor predictions!
+jags.inits <- function(){
+  list(sigma=rlnorm(1))
+}
+#Model Amphib_MeHg ~ Spp*Water_MeHg + Life_Stage + Habitat
+logmercuryanova2.2 <- function () {
+  for(i in 1:n){
+    hg[i] ~ dnorm(mu[i], tau)
+    mu[i] <- alpha[spp[i]] + beta.waterhg*waterhg[i] + beta.spp[spp[i]]*waterhg[i]
+    esthg[i] <- exp(mu[i])
+  }
+  for(i in 1:n.groups){
+    alpha[i] ~ dnorm(0, 0.001)
+    beta.spp[i] ~ dnorm(0, 0.001)
+  }
+  for(i in 1:n){
+    residual[i] <- hg[i]-mu[i]
+    predicted[i] <- mu[i]
+    sq[i] <- pow(residual[i],2)
+    y.new[i] ~ dnorm(mu[i], tau)
+    sq.new[i] <- pow(y.new[i] - predicted[i],2)
+  }
+  fit<- sum(sq[])
+  fit.new <- sum(sq.new[])
+  test <- step(fit.new - fit)
+  bpvalue <- mean(test)
+  sigma ~ dunif(0,100)
+  tau <- 1/(sigma*sigma)
+  beta.waterhg ~ dnorm(0,0.001)
+}
+
+jagsfitlogm2.2 <- jags(data = c("spp","hg","waterhg","n","n.groups"), inits = jags.inits, jags.params,
+                     n.iter = 20000, model.file = logmercuryanova2.2)
+
+print(jagsfitlogm2.2,digits = 5) 
+print(jagsfitlogm2, digits = 5)
 
